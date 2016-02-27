@@ -1,177 +1,110 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
+#include <netdb.h>
 #include <netinet/in.h>
-#include <netdb.h> 
+#include <sys/stat.h>
+#include <fcntl.h>
 
-#include <pthread.h>
-
-#include <iostream>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <errno.h>
+#include <iostream>
 
 using namespace std;
 
-struct hostData
+void client()
 {
-    string host;
-    string port;
-};
+	int sockfd;
+	struct hostent *host;
 
-bool sendMessage = false; //Should be false
-string message;
+	struct sockaddr_in remote;
 
-void error(const char *msg)
-{
-    perror(msg);
-    exit(0);
+	char host_str[100];
+	cout << "Enter hostname: ";
+	cin >> host_str;
+
+	cin.clear();
+	cin.ignore();
+
+	if( (host = gethostbyname(host_str)) == 0)
+		cerr << "gethostbyname() error: " << errno << endl;
+
+	if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+		cerr << "Socket creation error: " << errno << endl;
+
+	int port;
+	cout << "Enter port: ";
+	cin >> port;
+
+	remote.sin_family = AF_INET;
+	remote.sin_port = htons(port);
+	remote.sin_addr = *( (struct in_addr*) host->h_addr);
+
+	cout << "Connecting to " << host_str << ":" << port << endl;
+
+	memset( &(remote.sin_zero), 0, 8);
+	if( connect(sockfd, (struct sockaddr*) &remote, sizeof(struct sockaddr)) == -1)
+	{
+		cerr << "Connection error: " << errno << endl;
+	}
+	else
+	{
+		cerr << "Connected." << endl;
+	}
+
+	cout << endl << endl;
+
+	char temp[1024];
+	
+	while(1)
+	{
+		memset(temp, 0, sizeof(temp));
+		//Write
+		cout << "Enter message: ";
+		cin >> temp;
+
+		cout << "Writing: " << temp << endl;
+		write(sockfd, &temp, strlen(temp));
+		cout << "Write finished" << endl;
+		cout << "\n\n";
+		
+		memset(temp, 0, sizeof(temp));
+		//Read
+		cout << "Starting read" << endl;
+		int n = read(sockfd, &temp, sizeof(temp));
+		cout << "Read [" << n << "] bytes [" << temp << "]" << endl;
+
+		if( string(temp).substr(0,5) == "Image")
+		{
+			cout << "Starting image transfer." << endl;
+			//Extract path
+			//Open/creat file
+			while(1)
+			{	
+				//Read from network
+				memset(temp, 0, sizeof(temp));
+				int n = read(sockfd, &temp, sizeof(temp));
+				cout << "Read image data [" << temp << "]" << endl;
+				if( string(temp) == "Done")
+					break;
+				//Write to file
+			}
+			cout << "Image transfer complete." << endl;
+		}
+		
+		cout << "\n\n\n";
+	}
+
+	cout << "Client closing" << endl;
+	close(sockfd);
 }
 
-void *runClient(/*struct hostData*/ void* data)
+int main()
 {
-    cout << "Running Client code..." << endl;
-    struct hostData* h_data;
-    if(!data)
-    {
-        cout << "passed in data bad, exiting..." << endl;
-        exit(0);
-    }
-    h_data = (struct hostData*) data;
-    string tmpHost = h_data->host;
-    string tmpPort = h_data->port;    
-    
-    
-    int sockfd, portno, n;
-    struct sockaddr_in serv_addr;
-    struct hostent *server;
-
-    char buffer[256];
-        
-    server = gethostbyname( (h_data->host).c_str() );
-    
-    
-    if( !(h_data->port).c_str())
-    {
-        cout << "Port not set" << endl;
-        exit(0);
-    }
-    portno = atoi( (h_data->port).c_str() );
-    
-    if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-        cerr << "Socket creation error: " << errno << endl;
-
-    if (server == NULL) {
-        fprintf(stderr,"ERROR, no such host\n");
-        exit(0);
-    }
-
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
-
-    serv_addr.sin_port = htons(portno);
-    if ( connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) == -1)
-    {    
-        cerr << "Connection error: " << errno << endl;
-        exit(0);
-    }
-    
-    bool cont = true;
-    while(cont)
-    {
-        bzero(buffer,256);
-        while( (n = recv(sockfd, buffer, 255, MSG_DONTWAIT ) == 0) && !sendMessage );
-        
-        if(!sendMessage && n>0) // Should be !sendMessage, means we read something
-        {
-            if( n == -1)
-                cerr << "Read error: " << errno << endl;
-            
-            strtok(buffer, "\n");
-            if(string(buffer) == "close") //Closes current connection
-            {
-                break;
-            }
-            else if(string(buffer) == "quit") //Quits/closes the entire server
-            {
-                cont = false;
-            }
-            printf("Here is the message: %s\n",buffer);
-            
-            if( (n = write(sockfd,"I got your message",18)) < 0)
-                cerr << "Write error: " << errno << endl;
-        }
-        else if(sendMessage)//sendMessage is true, means that we need to send a message
-        {
-            cout << "Attempting to send: " << message << endl;
-            
-            if( (n = write(sockfd, message.c_str(), strlen( message.c_str() ))) == -1)
-                cerr << "Write error: " << errno << endl;
-            
-            sendMessage = false; //Message was sent, we can lower this flag
-            
-            if( message == "quit" || message == "close" )
-            {
-                break;
-            }
-
-            bzero(buffer,256);
-            if( (n = read(sockfd,buffer,255)) == -1)
-                cerr << "Read error: " << errno << endl; 
-            printf("%s\n",buffer);
-            
-
-        }
-        
-    }
-    
-    close(sockfd);
-    cout << "Socket closed" << endl;
-    delete (struct hostData*)data;
-    pthread_exit(NULL);
-    cout << "Thread returned" << endl;
-}
-
-
-
-int main(int argc, char *argv[])
-{   
-    if (argc < 3) {
-        fprintf(stderr,"usage %s hostname port\n", argv[0]);
-        exit(0);
-    }
-
-    hostData *h_info = new hostData;
-    h_info->host = argv[1];
-    h_info->port = argv[2];
-    
-    cout << "pre-host: " << h_info->host << endl;
-    cout << "pre-Port: " << h_info->port << endl;
-    
-    pthread_t clientThread;
-    
-    pthread_create(&clientThread, NULL, runClient, (void*)h_info ); 
-    
-    //cout << "MAIN: Create finished" << endl;
-    //runClient((void*) &h_info);
-    
-    while(1)
-    {
-        cout << "Enter your message: ";
-        cin >> message;
-        sendMessage = true;
-        while(sendMessage);
-        cout << "Message sent" << endl;
-        if(message == "quit" || message == "close")
-            break;
-    }
-    
-    cout << "MAIN: Main before pthread_exit" << endl;
-    pthread_exit(NULL);
-    
-    cout << "MAIN: Main returned" << endl;
-    
-    return 0;
+	client();
+	return 0;
 }
