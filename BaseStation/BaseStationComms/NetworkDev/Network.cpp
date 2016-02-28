@@ -6,6 +6,7 @@
 #include <iostream>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -36,23 +37,15 @@ split(const string s, const string pat ) {
     }
 }
 
-Network::Network(string ip = "", string port = "", bool server = false):
+Network::Network(string ip, int port, bool server):
 	myIP(ip),
 	myPort(port),
 	isServer(server)
 {
+	sendingMessage = "";
+	sendingImage = false;
 	mySendPacket=0;
 
-	if(!isServer && myIP == "")
-	{
-		cout << "Enter hostname: ";
-		cin >> myIP;
-	}
-	if(myPort == "")
-	{
-		cout << "Enter port: ";
-		cin >> myPort;
-	}
 
 	if(isServer)
 	{
@@ -70,6 +63,14 @@ void Network::SendPacket(uint32_t packet){
 	mySendPacket=packet;
 }
 
+void Network::SendFile(string filePath)
+{
+	string temp = sendingMessage; //Store sending message;
+	sendingMessage = "Image,,," + filePath; //Set up the send file message
+	while(!sendingImage); //Wait until image is sent
+	sendingMessage = temp; //Restore the old sending message
+}
+
 void Network::ServerWorker(){
 	int sin_len;
 	int sockfd, new_fd;
@@ -80,23 +81,21 @@ void Network::ServerWorker(){
 	if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
 		cerr << "Socket creation error: " << errno << endl;
 
-	int port;
-	cout << "Enter port: ";
-	cin >> port;
-
 	local_addr.sin_family = AF_INET;
-	local_addr.sin_port = htons(port);
+	local_addr.sin_port = htons(myPort);
 	local_addr.sin_addr.s_addr = INADDR_ANY;
 
 	memset( &(local_addr.sin_zero), 0, 8);
 	if( bind(sockfd, (struct sockaddr*) &local_addr, sizeof(struct sockaddr) ) == -1)
 		cerr << "Port bind error: " << errno << endl;
 
-	cout << "Waiting for a connection." << endl;
+	cout << "Waiting for a connection on port: " << myPort << "." << endl;
 	if(listen(sockfd,5) == -1)
 		cerr << "Listen error: " << errno << endl;
 
 	sin_len = sizeof(struct sockaddr_in);
+
+	vector<string> v;
 
 	while(1)
 	{
@@ -116,6 +115,13 @@ void Network::ServerWorker(){
 			int n = read(new_fd, &temp, sizeof(temp));
 			cout << "Read [" << n << "] bytes [" << temp << "]" << endl;
 			
+			v = split(string(temp), ",,,");
+
+			if(v.at(0) == "Exit")
+			{
+				break;
+			}
+
 			//Write
 			memset(temp, 0, sizeof(temp));
 			cout << "Enter message: ";
@@ -125,7 +131,7 @@ void Network::ServerWorker(){
 			write(new_fd, &temp, strlen(temp));
 			cout << "Write finished" << endl;
 
-			vector<string> v = split(string(temp), ",,,");
+			v = split(string(temp), ",,,");
 
 			//if( string(temp).substr(0,5) == "Image")
 			if(v.at(0) == "Image")
@@ -157,6 +163,7 @@ void Network::ServerWorker(){
 					memset(temp, 0, sizeof(temp));
 					strncpy(temp, "Done", 4);
 					write(new_fd, &temp, strlen(temp));
+					sendingImage = false;
 					cout << "Image transfer complete." << endl;
 				}
 				else
@@ -164,6 +171,10 @@ void Network::ServerWorker(){
 					cout << "Transfer failed" << endl;
 					cout << "Received: " << string(temp) << endl;
 				}
+			}
+			else if(v.at(0) == "Exit")
+			{
+				break;
 			}
 
 			cout << "\n\n\n" << endl;
@@ -182,28 +193,17 @@ void Network::ClientWorker(){
 
 	struct sockaddr_in remote;
 
-	char host_str[100];
-	cout << "Enter hostname: ";
-	cin >> host_str;
-
-	cin.clear();
-	cin.ignore();
-
-	if( (host = gethostbyname(host_str)) == 0)
+	if( (host = gethostbyname(myIP.c_str())) == 0)
 		cerr << "gethostbyname() error: " << errno << endl;
 
 	if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
 		cerr << "Socket creation error: " << errno << endl;
 
-	int port;
-	cout << "Enter port: ";
-	cin >> port;
-
 	remote.sin_family = AF_INET;
-	remote.sin_port = htons(port);
+	remote.sin_port = htons(myPort);
 	remote.sin_addr = *( (struct in_addr*) host->h_addr);
 
-	cout << "Connecting to " << host_str << ":" << port << endl;
+	cout << "Connecting to " << myIP << ":" << myPort << endl;
 
 	memset( &(remote.sin_zero), 0, 8);
 	if( connect(sockfd, (struct sockaddr*) &remote, sizeof(struct sockaddr)) == -1)
@@ -218,6 +218,7 @@ void Network::ClientWorker(){
 	cout << endl << endl;
 
 	char temp[1024];
+	vector<string> v;
 	
 	while(1)
 	{
@@ -231,13 +232,20 @@ void Network::ClientWorker(){
 		cout << "Write finished" << endl;
 		cout << "\n\n";
 		
+		v = split(string(temp), ",,,");
+
+		if(v.at(0) == "Exit")
+		{
+			break;
+		}
+		
 		memset(temp, 0, sizeof(temp));
 		//Read
 		cout << "Starting read" << endl;
 		int n = read(sockfd, &temp, sizeof(temp));
 		cout << "Read [" << n << "] bytes [" << temp << "]" << endl;
 
-		vector<string> v = split(string(temp), ",,,");
+		v = split(string(temp), ",,,");
 
 		if( v.at(0) == "Image")
 		{
@@ -249,7 +257,7 @@ void Network::ClientWorker(){
 
 			//Extract path
 			//Open/creat file
-			int file_fd = open((const char*)v.at(1).c_str(), O_WRONLY | O_CREAT);
+			int file_fd = open((const char*)v.at(1).c_str(), O_WRONLY | O_CREAT, 0666);
 			while(1)
 			{	
 				//Read from network
@@ -264,7 +272,12 @@ void Network::ClientWorker(){
 					write(file_fd, &temp, strlen(temp));	
 				//Write to file
 			}
+			sendingImage = false;
 			cout << "Image transfer complete." << endl;
+		}
+		else if(v.at(0) == "Exit")
+		{
+			break;
 		}
 		
 		cout << "\n\n\n";

@@ -5,13 +5,18 @@ using namespace std;
 
 class Network{
     public:
-		Network(/*uint32_t*/ string ip, /*uint8_t*/ string port, bool server);
+		Network(string ip, int port, bool server);
 		void SendPacket(uint32_t packet);
+		void SendFile(string message);
     private:
 		void ServerWorker();
 		void ClientWorker();
-		/*uint32_t*/ string myIP;
-		/*uint8_t*/  string myPort;	
-		uint32_t mySendPacket;
+		string myIP;
+		int myPort;
 		bool isServer; // True if server, false if client
+
+		string sendingMessage;
+		bool sendingImage;
+
+		uint32_t mySendPacket;
 };
