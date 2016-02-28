@@ -15,11 +15,29 @@
 #include <unistd.h>
 #include <errno.h>
 #include <iostream>
+#include <vector>
 
 using namespace std;
 
+const int MAX_SIZE = 1024;
 
-void server()
+inline  // a simple utility for splitting strings at a find-pattern.
+vector<string>
+split(const string s, const string pat ) {
+    string c;
+    vector<string> v;
+    int i = 0;
+    for (;;) {
+        int t = s.find(pat,i);
+        int j = ( t == string::npos ) ? s.size() : t;
+        string c = s.substr(i,j-i);
+        v.push_back(c);
+        i = j+pat.size();
+        if ( t == string::npos ) return v;
+    }
+}
+
+void server() //Payload
 {
 
 	int sin_len;
@@ -56,11 +74,12 @@ void server()
 		//TODO: Insepct ip and make sure it is expected ip
 		cout << "Connection accepted." << endl;
 
-		char temp[1024];
+		char temp[MAX_SIZE];
 
 		while(1)
 		{
 			memset(temp, 0, sizeof(temp));
+
 			//Read
 			cout << "Starting read" << endl;
 			int n = read(new_fd, &temp, sizeof(temp));
@@ -75,26 +94,45 @@ void server()
 			write(new_fd, &temp, strlen(temp));
 			cout << "Write finished" << endl;
 
-			if( string(temp).substr(0,5) == "Image")
+			vector<string> v = split(string(temp), ",,,");
+
+			//if( string(temp).substr(0,5) == "Image")
+			if(v.at(0) == "Image")
 			{
 				cout << "Starting image transfer." << endl;
-				//Open source file
-				while(1)//Continue will able to read from file
-				{	
-					//Read from file
-					//Write to network
-					memset(temp, 0, sizeof(temp));
-					cout << "Image data: ";
-					cin >> temp;
-					if(string(temp) == "Done")
-						break;
-					write(new_fd, &temp, strlen(temp));
-
-				}
+				// Wait for client to accept image transfer
 				memset(temp, 0, sizeof(temp));
-				strncpy(temp, "Done", 4);
-				write(new_fd, &temp, strlen(temp));
-				cout << "Image transfer complete." << endl;
+				int n = read(new_fd, &temp, sizeof(temp));
+				if(string(temp) == "Ready")
+				{
+
+					//Open source file
+					int file_fd = open((const char*)v.at(1).c_str(), O_RDONLY);
+					
+					memset(temp, 0, sizeof(temp));
+					while((n = read(file_fd, temp, MAX_SIZE)) > 0)//Continue while able to read from file
+					{	
+						write(new_fd, &temp, strlen(temp));
+
+						//Write to network
+						
+						//cout << "Image data: ";
+						//cin >> temp;
+						//if(string(temp) == "Done")
+						//	break;
+						//write(new_fd, &temp, strlen(temp));
+
+					}
+					memset(temp, 0, sizeof(temp));
+					strncpy(temp, "Done", 4);
+					write(new_fd, &temp, strlen(temp));
+					cout << "Image transfer complete." << endl;
+				}
+				else
+				{
+					cout << "Transfer failed" << endl;
+					cout << "Received: " << string(temp) << endl;
+				}
 			}
 
 			cout << "\n\n\n" << endl;

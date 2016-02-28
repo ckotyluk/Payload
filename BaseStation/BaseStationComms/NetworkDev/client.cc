@@ -13,10 +13,27 @@
 #include <unistd.h>
 #include <errno.h>
 #include <iostream>
+#include <vector>
 
 using namespace std;
 
-void client()
+inline  // a simple utility for splitting strings at a find-pattern.
+vector<string>
+split(const string s, const string pat ) {
+    string c;
+    vector<string> v;
+    int i = 0;
+    for (;;) {
+        int t = s.find(pat,i);
+        int j = ( t == string::npos ) ? s.size() : t;
+        string c = s.substr(i,j-i);
+        v.push_back(c);
+        i = j+pat.size();
+        if ( t == string::npos ) return v;
+    }
+}
+
+void client() //Base station
 {
 	int sockfd;
 	struct hostent *host;
@@ -78,19 +95,31 @@ void client()
 		int n = read(sockfd, &temp, sizeof(temp));
 		cout << "Read [" << n << "] bytes [" << temp << "]" << endl;
 
-		if( string(temp).substr(0,5) == "Image")
+		vector<string> v = split(string(temp), ",,,");
+
+		if( v.at(0) == "Image")
 		{
 			cout << "Starting image transfer." << endl;
+			// Tell server we are ready to receive image
+			memset(temp, 0, sizeof(temp));
+			strncpy(temp, "Ready", 5);
+			write(sockfd, &temp, strlen(temp));
+
 			//Extract path
 			//Open/creat file
+			int file_fd = open((const char*)v.at(1).c_str(), O_WRONLY | O_CREAT);
 			while(1)
 			{	
 				//Read from network
 				memset(temp, 0, sizeof(temp));
 				int n = read(sockfd, &temp, sizeof(temp));
 				cout << "Read image data [" << temp << "]" << endl;
+				cout << "n read: " << n << "size of temp: " << strlen(temp) << endl;
+				
 				if( string(temp) == "Done")
 					break;
+				else
+					write(file_fd, &temp, strlen(temp));	
 				//Write to file
 			}
 			cout << "Image transfer complete." << endl;
