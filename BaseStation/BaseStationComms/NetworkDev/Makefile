@@ -1,10 +1,10 @@
-all: client server
+all: main
 
-client: client.cc
-	g++ client.cc -pthread -o client
+Network.o: Network.h Network.cpp
+	g++ Network.cpp -c
 
-server: server.cc
-	g++ server.cc -pthread -o server
+main: Network.o
+	g++ main.cpp Network.o -o main
 
 clean:
-	rm client server
+	rm *.o main
